@@ -14,18 +14,15 @@ import type {
   NativeMethodsMixinType,
   ReactNativeBaseComponentViewConfig,
 } from './ReactNativeTypes';
+import type {ReactEventResponder} from 'shared/ReactTypes';
 
-import {
-  mountSafeCallback_NOT_REALLY_SAFE,
-  warnForStyleProps,
-} from './NativeMethodsMixinUtils';
+import {mountSafeCallback_NOT_REALLY_SAFE} from './NativeMethodsMixinUtils';
 import {create, diff} from './ReactNativeAttributePayload';
 import {get as getViewConfigForType} from 'ReactNativeViewConfigRegistry';
 
 import deepFreezeAndThrowOnMutationInDev from 'deepFreezeAndThrowOnMutationInDev';
 import invariant from 'shared/invariant';
 import warningWithoutStack from 'shared/warningWithoutStack';
-import {warnAboutDeprecatedSetNativeProps} from 'shared/ReactFeatureFlags';
 
 import {dispatchEvent} from './ReactFabricEventEmitter';
 
@@ -122,44 +119,48 @@ class ReactFabricHostComponent {
   }
 
   measureLayout(
-    relativeToNativeNode: number,
+    relativeToNativeNode: number | Object,
     onSuccess: MeasureLayoutOnSuccessCallback,
     onFail: () => void /* currently unused */,
   ) {
+    let relativeNode;
+
+    if (typeof relativeToNativeNode === 'number') {
+      // Already a node handle
+      relativeNode = relativeToNativeNode;
+    } else if (relativeToNativeNode._nativeTag) {
+      relativeNode = relativeToNativeNode._nativeTag;
+    } else if (
+      relativeToNativeNode.canonical &&
+      relativeToNativeNode.canonical._nativeTag
+    ) {
+      relativeNode = relativeToNativeNode.canonical._nativeTag;
+    }
+
+    if (relativeNode == null) {
+      warningWithoutStack(
+        false,
+        'Warning: ref.measureLayout must be called with a node handle or a ref to a native component.',
+      );
+
+      return;
+    }
+
     UIManager.measureLayout(
       this._nativeTag,
-      relativeToNativeNode,
+      relativeNode,
       mountSafeCallback_NOT_REALLY_SAFE(this, onFail),
       mountSafeCallback_NOT_REALLY_SAFE(this, onSuccess),
     );
   }
 
   setNativeProps(nativeProps: Object) {
-    if (__DEV__) {
-      if (warnAboutDeprecatedSetNativeProps) {
-        warningWithoutStack(
-          false,
-          'Warning: Calling ref.setNativeProps(nativeProps) ' +
-            'is deprecated and will be removed in a future release. ' +
-            'Use the setNativeProps export from the react-native package instead.' +
-            "\n\timport {setNativeProps} from 'react-native';\n\tsetNativeProps(ref, nativeProps);\n",
-        );
-      }
-      warnForStyleProps(nativeProps, this.viewConfig.validAttributes);
-    }
+    warningWithoutStack(
+      false,
+      'Warning: setNativeProps is not currently supported in Fabric',
+    );
 
-    const updatePayload = create(nativeProps, this.viewConfig.validAttributes);
-
-    // Avoid the overhead of bridge calls if there's no update.
-    // This is an expensive no-op for Android, and causes an unnecessary
-    // view invalidation for certain components (eg RCTTextInput) on iOS.
-    if (updatePayload != null) {
-      UIManager.updateView(
-        this._nativeTag,
-        this.viewConfig.uiViewClassName,
-        updatePayload,
-      );
-    }
+    return;
   }
 }
 
@@ -282,6 +283,14 @@ export function getChildHostContext(
   }
 }
 
+export function getChildHostContextForEvent(
+  parentHostContext: HostContext,
+  type: Symbol | number,
+) {
+  // TODO: add getChildHostContextForEvent implementation
+  return parentHostContext;
+}
+
 export function getPublicInstance(instance: Instance): * {
   return instance.canonical;
 }
@@ -387,34 +396,7 @@ export function cloneHiddenInstance(
   };
 }
 
-export function cloneUnhiddenInstance(
-  instance: Instance,
-  type: string,
-  props: Props,
-  internalInstanceHandle: Object,
-): Instance {
-  const viewConfig = instance.canonical.viewConfig;
-  const node = instance.node;
-  const updatePayload = diff(
-    {...props, style: [props.style, {display: 'none'}]},
-    props,
-    viewConfig.validAttributes,
-  );
-  return {
-    node: cloneNodeWithNewProps(node, updatePayload),
-    canonical: instance.canonical,
-  };
-}
-
 export function cloneHiddenTextInstance(
-  instance: Instance,
-  text: string,
-  internalInstanceHandle: Object,
-): TextInstance {
-  throw new Error('Not yet implemented.');
-}
-
-export function cloneUnhiddenTextInstance(
   instance: Instance,
   text: string,
   internalInstanceHandle: Object,
@@ -444,3 +426,19 @@ export function replaceContainerChildren(
   container: Container,
   newChildren: ChildSet,
 ): void {}
+
+export function handleEventComponent(
+  eventResponder: ReactEventResponder,
+  rootContainerInstance: Container,
+  internalInstanceHandle: Object,
+) {
+  // TODO: add handleEventComponent implementation
+}
+
+export function handleEventTarget(
+  type: Symbol | number,
+  props: Props,
+  internalInstanceHandle: Object,
+) {
+  // TODO: add handleEventTarget implementation
+}

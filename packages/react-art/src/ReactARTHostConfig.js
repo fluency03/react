@@ -340,6 +340,10 @@ export function getChildHostContext() {
   return NO_CONTEXT;
 }
 
+export function getChildHostContextForEvent() {
+  return NO_CONTEXT;
+}
+
 export const scheduleTimeout = setTimeout;
 export const cancelTimeout = clearTimeout;
 export const noTimeout = -1;
@@ -429,4 +433,20 @@ export function unhideInstance(instance, props) {
 
 export function unhideTextInstance(textInstance, text): void {
   // Noop
+}
+
+export function handleEventComponent(
+  eventResponder: ReactEventResponder,
+  rootContainerInstance: Container,
+  internalInstanceHandle: Object,
+) {
+  // TODO: add handleEventComponent implementation
+}
+
+export function handleEventTarget(
+  type: Symbol | number,
+  props: Props,
+  internalInstanceHandle: Object,
+) {
+  // TODO: add handleEventTarget implementation
 }

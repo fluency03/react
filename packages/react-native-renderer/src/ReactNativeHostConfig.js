@@ -8,6 +8,7 @@
  */
 
 import type {ReactNativeBaseComponentViewConfig} from './ReactNativeTypes';
+import type {ReactEventResponder} from 'shared/ReactTypes';
 
 import invariant from 'shared/invariant';
 
@@ -203,6 +204,14 @@ export function getChildHostContext(
   } else {
     return parentHostContext;
   }
+}
+
+export function getChildHostContextForEvent(
+  parentHostContext: HostContext,
+  type: Symbol | number,
+) {
+  // TODO: add getChildHostContextForEvent implementation
+  return parentHostContext;
 }
 
 export function getPublicInstance(instance: Instance): * {
@@ -475,4 +484,20 @@ export function unhideTextInstance(
   text: string,
 ): void {
   throw new Error('Not yet implemented.');
+}
+
+export function handleEventComponent(
+  eventResponder: ReactEventResponder,
+  rootContainerInstance: Container,
+  internalInstanceHandle: Object,
+) {
+  // TODO: add handleEventComponent implementation
+}
+
+export function handleEventTarget(
+  type: Symbol | number,
+  props: Props,
+  internalInstanceHandle: Object,
+) {
+  // TODO: add handleEventTarget implementation
 }

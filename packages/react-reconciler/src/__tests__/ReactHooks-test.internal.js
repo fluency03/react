@@ -46,7 +46,12 @@ describe('ReactHooks', () => {
       expect(() => {
         ReactTestRenderer.create(<Example />);
       }).toThrow(
-        'Hooks can only be called inside the body of a function component.',
+        'Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen' +
+          ' for one of the following reasons:\n' +
+          '1. You might have mismatching versions of React and the renderer (such as React DOM)\n' +
+          '2. You might be breaking the Rules of Hooks\n' +
+          '3. You might have more than one copy of React in the same app\n' +
+          'See https://fb.me/react-invalid-hook-call for tips about how to debug and fix this problem.',
       );
     });
   }
@@ -715,20 +720,20 @@ describe('ReactHooks', () => {
 
     const root1 = ReactTestRenderer.create(null);
     expect(() => root1.update(<App return={17} />)).toWarnDev([
-      'Warning: An Effect function must not return anything besides a ' +
+      'Warning: An effect function must not return anything besides a ' +
         'function, which is used for clean-up. You returned: 17',
     ]);
 
     const root2 = ReactTestRenderer.create(null);
     expect(() => root2.update(<App return={null} />)).toWarnDev([
-      'Warning: An Effect function must not return anything besides a ' +
+      'Warning: An effect function must not return anything besides a ' +
         'function, which is used for clean-up. You returned null. If your ' +
         'effect does not require clean up, return undefined (or nothing).',
     ]);
 
     const root3 = ReactTestRenderer.create(null);
     expect(() => root3.update(<App return={Promise.resolve()} />)).toWarnDev([
-      'Warning: An Effect function must not return anything besides a ' +
+      'Warning: An effect function must not return anything besides a ' +
         'function, which is used for clean-up.\n\n' +
         'It looks like you wrote useEffect(async () => ...) or returned a Promise.',
     ]);
@@ -875,15 +880,30 @@ describe('ReactHooks', () => {
     const root = ReactTestRenderer.create(<MemoApp />);
     // trying to render again should trigger comparison and throw
     expect(() => root.update(<MemoApp />)).toThrow(
-      'Hooks can only be called inside the body of a function component',
+      'Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for' +
+        ' one of the following reasons:\n' +
+        '1. You might have mismatching versions of React and the renderer (such as React DOM)\n' +
+        '2. You might be breaking the Rules of Hooks\n' +
+        '3. You might have more than one copy of React in the same app\n' +
+        'See https://fb.me/react-invalid-hook-call for tips about how to debug and fix this problem.',
     );
     // the next round, it does a fresh mount, so should render
     expect(() => root.update(<MemoApp />)).not.toThrow(
-      'Hooks can only be called inside the body of a function component',
+      'Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for' +
+        ' one of the following reasons:\n' +
+        '1. You might have mismatching versions of React and the renderer (such as React DOM)\n' +
+        '2. You might be breaking the Rules of Hooks\n' +
+        '3. You might have more than one copy of React in the same app\n' +
+        'See https://fb.me/react-invalid-hook-call for tips about how to debug and fix this problem.',
     );
     // and then again, fail
     expect(() => root.update(<MemoApp />)).toThrow(
-      'Hooks can only be called inside the body of a function component',
+      'Invalid hook call. Hooks can only be called inside of the body of a function component. This could happen for' +
+        ' one of the following reasons:\n' +
+        '1. You might have mismatching versions of React and the renderer (such as React DOM)\n' +
+        '2. You might be breaking the Rules of Hooks\n' +
+        '3. You might have more than one copy of React in the same app\n' +
+        'See https://fb.me/react-invalid-hook-call for tips about how to debug and fix this problem.',
     );
   });
 
@@ -1307,7 +1327,14 @@ describe('ReactHooks', () => {
     expect(renderCount).toBe(1);
 
     renderCount = 0;
-    renderer.update(<Factory />);
+    expect(() => renderer.update(<Factory />)).toWarnDev(
+      'Warning: The <Factory /> component appears to be a function component that returns a class instance. ' +
+        'Change Factory to a class that extends React.Component instead. ' +
+        "If you can't use a class try assigning the prototype on the function as a workaround. " +
+        '`Factory.prototype = React.Component.prototype`. ' +
+        "Don't use an arrow function since it cannot be called with `new` by React.",
+      {withoutStack: true},
+    );
     expect(renderCount).toBe(1);
     renderCount = 0;
     renderer.update(<Factory />);

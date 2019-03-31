@@ -461,6 +461,97 @@ const bundles = [
     global: 'SchedulerTracing',
     externals: [],
   },
+
+  /******* React Events (experimental) *******/
+  {
+    bundleTypes: [
+      UMD_DEV,
+      UMD_PROD,
+      NODE_DEV,
+      NODE_PROD,
+      FB_WWW_DEV,
+      FB_WWW_PROD,
+    ],
+    moduleType: ISOMORPHIC,
+    entry: 'react-events',
+    global: 'ReactEvents',
+    externals: [],
+  },
+
+  {
+    bundleTypes: [
+      UMD_DEV,
+      UMD_PROD,
+      NODE_DEV,
+      NODE_PROD,
+      FB_WWW_DEV,
+      FB_WWW_PROD,
+    ],
+    moduleType: NON_FIBER_RENDERER,
+    entry: 'react-events/press',
+    global: 'ReactEventsPress',
+    externals: [],
+  },
+
+  {
+    bundleTypes: [
+      UMD_DEV,
+      UMD_PROD,
+      NODE_DEV,
+      NODE_PROD,
+      FB_WWW_DEV,
+      FB_WWW_PROD,
+    ],
+    moduleType: NON_FIBER_RENDERER,
+    entry: 'react-events/hover',
+    global: 'ReactEventsHover',
+    externals: [],
+  },
+
+  {
+    bundleTypes: [
+      UMD_DEV,
+      UMD_PROD,
+      NODE_DEV,
+      NODE_PROD,
+      FB_WWW_DEV,
+      FB_WWW_PROD,
+    ],
+    moduleType: NON_FIBER_RENDERER,
+    entry: 'react-events/focus',
+    global: 'ReactEventsFocus',
+    externals: [],
+  },
+
+  {
+    bundleTypes: [
+      UMD_DEV,
+      UMD_PROD,
+      NODE_DEV,
+      NODE_PROD,
+      FB_WWW_DEV,
+      FB_WWW_PROD,
+    ],
+    moduleType: NON_FIBER_RENDERER,
+    entry: 'react-events/swipe',
+    global: 'ReactEventsSwipe',
+    externals: [],
+  },
+
+  {
+    bundleTypes: [
+      UMD_DEV,
+      UMD_PROD,
+      NODE_DEV,
+      NODE_PROD,
+      FB_WWW_DEV,
+      FB_WWW_PROD,
+    ],
+    moduleType: NON_FIBER_RENDERER,
+    entry: 'react-events/drag',
+    global: 'ReactEventsDrag',
+    externals: [],
+  },
 ];
 
 // Based on deep-freeze by substack (public domain)

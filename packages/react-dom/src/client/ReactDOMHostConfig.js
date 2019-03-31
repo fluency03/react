@@ -24,6 +24,7 @@ import {
   warnForDeletedHydratableText,
   warnForInsertedHydratedElement,
   warnForInsertedHydratedText,
+  listenToEventResponderEventTypes,
 } from './ReactDOMComponent';
 import {getSelectionInformation, restoreSelection} from './ReactInputSelection';
 import setTextContent from './setTextContent';
@@ -43,6 +44,13 @@ import {
 import dangerousStyleValue from '../shared/dangerousStyleValue';
 
 import type {DOMContainer} from './ReactDOM';
+import type {ReactEventResponder} from 'shared/ReactTypes';
+import {
+  REACT_EVENT_COMPONENT_TYPE,
+  REACT_EVENT_TARGET_TYPE,
+  REACT_EVENT_TARGET_TOUCH_HIT,
+} from 'shared/ReactSymbols';
+import getElementFromTouchHitTarget from 'shared/getElementFromTouchHitTarget';
 
 export type Type = string;
 export type Props = {
@@ -64,6 +72,10 @@ export type PublicInstance = Element | Text;
 type HostContextDev = {
   namespace: string,
   ancestorInfo: mixed,
+  eventData: null | {|
+    isEventComponent?: boolean,
+    isEventTarget?: boolean,
+  |},
 };
 type HostContextProd = string;
 export type HostContext = HostContextDev | HostContextProd;
@@ -72,7 +84,11 @@ export type ChildSet = void; // Unused
 export type TimeoutHandle = TimeoutID;
 export type NoTimeout = -1;
 
-import {enableSuspenseServerRenderer} from 'shared/ReactFeatureFlags';
+import {
+  enableSuspenseServerRenderer,
+  enableEventAPI,
+} from 'shared/ReactFeatureFlags';
+import warning from 'shared/warning';
 
 // Intentionally not named imports because Rollup would
 // use dynamic dispatch for CommonJS interop named imports.
@@ -141,7 +157,7 @@ export function getRootHostContext(
   if (__DEV__) {
     const validatedTag = type.toLowerCase();
     const ancestorInfo = updatedAncestorInfo(null, validatedTag);
-    return {namespace, ancestorInfo};
+    return {namespace, ancestorInfo, eventData: null};
   }
   return namespace;
 }
@@ -158,10 +174,40 @@ export function getChildHostContext(
       parentHostContextDev.ancestorInfo,
       type,
     );
-    return {namespace, ancestorInfo};
+    return {namespace, ancestorInfo, eventData: null};
   }
   const parentNamespace = ((parentHostContext: any): HostContextProd);
   return getChildNamespace(parentNamespace, type);
+}
+
+export function getChildHostContextForEvent(
+  parentHostContext: HostContext,
+  type: Symbol | number,
+): HostContext {
+  if (__DEV__) {
+    const parentHostContextDev = ((parentHostContext: any): HostContextDev);
+    const {namespace, ancestorInfo} = parentHostContextDev;
+    let eventData = null;
+
+    if (type === REACT_EVENT_COMPONENT_TYPE) {
+      eventData = {
+        isEventComponent: true,
+        isEventTarget: false,
+      };
+    } else if (type === REACT_EVENT_TARGET_TYPE) {
+      warning(
+        parentHostContextDev.eventData !== null &&
+          parentHostContextDev.eventData.isEventComponent,
+        'validateDOMNesting: React event targets must be direct children of event components.',
+      );
+      eventData = {
+        isEventComponent: false,
+        isEventTarget: true,
+      };
+    }
+    return {namespace, ancestorInfo, eventData};
+  }
+  return parentHostContext;
 }
 
 export function getPublicInstance(instance: Instance): * {
@@ -295,6 +341,23 @@ export function createTextInstance(
   if (__DEV__) {
     const hostContextDev = ((hostContext: any): HostContextDev);
     validateDOMNesting(null, text, hostContextDev.ancestorInfo);
+    if (enableEventAPI) {
+      const eventData = hostContextDev.eventData;
+      if (eventData !== null) {
+        warning(
+          !eventData.isEventComponent,
+          'validateDOMNesting: React event components cannot have text DOM nodes as children. ' +
+            'Wrap the child text "%s" in an element.',
+          text,
+        );
+        warning(
+          !eventData.isEventTarget,
+          'validateDOMNesting: React event targets cannot have text DOM nodes as children. ' +
+            'Wrap the child text "%s" in an element.',
+          text,
+        );
+      }
+    }
   }
   const textNode: TextInstance = createTextNode(text, rootContainerInstance);
   precacheFiberNode(internalInstanceHandle, textNode);
@@ -791,5 +854,45 @@ export function didNotFindHydratableSuspenseInstance(
 ) {
   if (__DEV__ && parentProps[SUPPRESS_HYDRATION_WARNING] !== true) {
     // TODO: warnForInsertedHydratedSuspense(parentInstance);
+  }
+}
+
+export function handleEventComponent(
+  eventResponder: ReactEventResponder,
+  rootContainerInstance: Container,
+  internalInstanceHandle: Object,
+): void {
+  if (enableEventAPI) {
+    const rootElement = rootContainerInstance.ownerDocument;
+    listenToEventResponderEventTypes(
+      eventResponder.targetEventTypes,
+      rootElement,
+    );
+  }
+}
+
+export function handleEventTarget(
+  type: Symbol | number,
+  props: Props,
+  internalInstanceHandle: Object,
+): void {
+  if (enableEventAPI) {
+    // Touch target hit slop handling
+    if (type === REACT_EVENT_TARGET_TOUCH_HIT) {
+      // Validates that there is a single element
+      const element = getElementFromTouchHitTarget(internalInstanceHandle);
+      if (element !== null) {
+        // We update the event target state node to be that of the element.
+        // We can then diff this entry to determine if we need to add the
+        // hit slop element, or change the dimensions of the hit slop.
+        const lastElement = internalInstanceHandle.stateNode;
+        if (lastElement !== element) {
+          internalInstanceHandle.stateNode = element;
+          // TODO: Create the hit slop element and attach it to the element
+        } else {
+          // TODO: Diff the left, top, right, bottom props
+        }
+      }
+    }
   }
 }

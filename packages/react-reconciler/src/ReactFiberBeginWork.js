@@ -35,6 +35,8 @@ import {
   SimpleMemoComponent,
   LazyComponent,
   IncompleteClassComponent,
+  EventComponent,
+  EventTarget,
 } from 'shared/ReactWorkTags';
 import {
   NoEffect,
@@ -52,6 +54,7 @@ import {
   debugRenderPhaseSideEffectsForStrictMode,
   enableProfilerTimer,
   enableSuspenseServerRenderer,
+  enableEventAPI,
 } from 'shared/ReactFeatureFlags';
 import invariant from 'shared/invariant';
 import shallowEqual from 'shared/shallowEqual';
@@ -74,7 +77,11 @@ import {
   cloneChildFibers,
 } from './ReactChildFiber';
 import {processUpdateQueue} from './ReactUpdateQueue';
-import {NoWork, Never} from './ReactFiberExpirationTime';
+import {
+  NoWork,
+  Never,
+  computeAsyncExpiration,
+} from './ReactFiberExpirationTime';
 import {
   ConcurrentMode,
   NoContext,
@@ -89,7 +96,11 @@ import {
   registerSuspenseInstanceRetry,
 } from './ReactFiberHostConfig';
 import type {SuspenseInstance} from './ReactFiberHostConfig';
-import {pushHostContext, pushHostContainer} from './ReactFiberHostContext';
+import {
+  pushHostContext,
+  pushHostContainer,
+  pushHostContextForEvent,
+} from './ReactFiberHostContext';
 import {
   pushProvider,
   propagateContextChange,
@@ -133,13 +144,14 @@ import {
   createWorkInProgress,
   isSimpleFunctionComponent,
 } from './ReactFiber';
-import {retryTimedOutBoundary} from './ReactFiberScheduler';
+import {requestCurrentTime, retryTimedOutBoundary} from './ReactFiberScheduler';
 
 const ReactCurrentOwner = ReactSharedInternals.ReactCurrentOwner;
 
 let didReceiveUpdate: boolean = false;
 
 let didWarnAboutBadClass;
+let didWarnAboutModulePatternComponent;
 let didWarnAboutContextTypeOnFunctionComponent;
 let didWarnAboutGetDerivedStateOnFunctionComponent;
 let didWarnAboutFunctionRefs;
@@ -147,6 +159,7 @@ export let didWarnAboutReassigningProps;
 
 if (__DEV__) {
   didWarnAboutBadClass = {};
+  didWarnAboutModulePatternComponent = {};
   didWarnAboutContextTypeOnFunctionComponent = {};
   didWarnAboutGetDerivedStateOnFunctionComponent = {};
   didWarnAboutFunctionRefs = {};
@@ -1218,6 +1231,24 @@ function mountIndeterminateComponent(
     typeof value.render === 'function' &&
     value.$$typeof === undefined
   ) {
+    if (__DEV__) {
+      const componentName = getComponentName(Component) || 'Unknown';
+      if (!didWarnAboutModulePatternComponent[componentName]) {
+        warningWithoutStack(
+          false,
+          'The <%s /> component appears to be a function component that returns a class instance. ' +
+            'Change %s to a class that extends React.Component instead. ' +
+            "If you can't use a class try assigning the prototype on the function as a workaround. " +
+            "`%s.prototype = React.Component.prototype`. Don't use an arrow function since it " +
+            'cannot be called with `new` by React.',
+          componentName,
+          componentName,
+          componentName,
+        );
+        didWarnAboutModulePatternComponent[componentName] = true;
+      }
+    }
+
     // Proceed under the assumption that this is a class instance
     workInProgress.tag = ClassComponent;
 
@@ -1631,15 +1662,71 @@ function updateSuspenseComponent(
   return next;
 }
 
+function retrySuspenseComponentWithoutHydrating(
+  current: Fiber,
+  workInProgress: Fiber,
+  renderExpirationTime: ExpirationTime,
+) {
+  // Detach from the current dehydrated boundary.
+  current.alternate = null;
+  workInProgress.alternate = null;
+
+  // Insert a deletion in the effect list.
+  let returnFiber = workInProgress.return;
+  invariant(
+    returnFiber !== null,
+    'Suspense boundaries are never on the root. ' +
+      'This is probably a bug in React.',
+  );
+  const last = returnFiber.lastEffect;
+  if (last !== null) {
+    last.nextEffect = current;
+    returnFiber.lastEffect = current;
+  } else {
+    returnFiber.firstEffect = returnFiber.lastEffect = current;
+  }
+  current.nextEffect = null;
+  current.effectTag = Deletion;
+
+  // Upgrade this work in progress to a real Suspense component.
+  workInProgress.tag = SuspenseComponent;
+  workInProgress.stateNode = null;
+  workInProgress.memoizedState = null;
+  // This is now an insertion.
+  workInProgress.effectTag |= Placement;
+  // Retry as a real Suspense component.
+  return updateSuspenseComponent(null, workInProgress, renderExpirationTime);
+}
+
 function updateDehydratedSuspenseComponent(
   current: Fiber | null,
   workInProgress: Fiber,
   renderExpirationTime: ExpirationTime,
 ) {
+  const suspenseInstance = (workInProgress.stateNode: SuspenseInstance);
   if (current === null) {
     // During the first pass, we'll bail out and not drill into the children.
     // Instead, we'll leave the content in place and try to hydrate it later.
-    workInProgress.expirationTime = Never;
+    if (isSuspenseInstanceFallback(suspenseInstance)) {
+      // This is a client-only boundary. Since we won't get any content from the server
+      // for this, we need to schedule that at a higher priority based on when it would
+      // have timed out. In theory we could render it in this pass but it would have the
+      // wrong priority associated with it and will prevent hydration of parent path.
+      // Instead, we'll leave work left on it to render it in a separate commit.
+
+      // TODO This time should be the time at which the server rendered response that is
+      // a parent to this boundary was displayed. However, since we currently don't have
+      // a protocol to transfer that time, we'll just estimate it by using the current
+      // time. This will mean that Suspense timeouts are slightly shifted to later than
+      // they should be.
+      let serverDisplayTime = requestCurrentTime();
+      // Schedule a normal pri update to render this content.
+      workInProgress.expirationTime = computeAsyncExpiration(serverDisplayTime);
+    } else {
+      // We'll continue hydrating the rest at offscreen priority since we'll already
+      // be showing the right content coming from the server, it is no rush.
+      workInProgress.expirationTime = Never;
+    }
     return null;
   }
   if ((workInProgress.effectTag & DidCapture) !== NoEffect) {
@@ -1648,55 +1735,31 @@ function updateDehydratedSuspenseComponent(
     workInProgress.child = null;
     return null;
   }
+  if (isSuspenseInstanceFallback(suspenseInstance)) {
+    // This boundary is in a permanent fallback state. In this case, we'll never
+    // get an update and we'll never be able to hydrate the final content. Let's just try the
+    // client side render instead.
+    return retrySuspenseComponentWithoutHydrating(
+      current,
+      workInProgress,
+      renderExpirationTime,
+    );
+  }
   // We use childExpirationTime to indicate that a child might depend on context, so if
   // any context has changed, we need to treat is as if the input might have changed.
   const hasContextChanged = current.childExpirationTime >= renderExpirationTime;
-  const suspenseInstance = (current.stateNode: SuspenseInstance);
-  if (
-    didReceiveUpdate ||
-    hasContextChanged ||
-    isSuspenseInstanceFallback(suspenseInstance)
-  ) {
+  if (didReceiveUpdate || hasContextChanged) {
     // This boundary has changed since the first render. This means that we are now unable to
     // hydrate it. We might still be able to hydrate it using an earlier expiration time but
     // during this render we can't. Instead, we're going to delete the whole subtree and
     // instead inject a new real Suspense boundary to take its place, which may render content
     // or fallback. The real Suspense boundary will suspend for a while so we have some time
     // to ensure it can produce real content, but all state and pending events will be lost.
-
-    // Alternatively, this boundary is in a permanent fallback state. In this case, we'll never
-    // get an update and we'll never be able to hydrate the final content. Let's just try the
-    // client side render instead.
-
-    // Detach from the current dehydrated boundary.
-    current.alternate = null;
-    workInProgress.alternate = null;
-
-    // Insert a deletion in the effect list.
-    let returnFiber = workInProgress.return;
-    invariant(
-      returnFiber !== null,
-      'Suspense boundaries are never on the root. ' +
-        'This is probably a bug in React.',
+    return retrySuspenseComponentWithoutHydrating(
+      current,
+      workInProgress,
+      renderExpirationTime,
     );
-    const last = returnFiber.lastEffect;
-    if (last !== null) {
-      last.nextEffect = current;
-      returnFiber.lastEffect = current;
-    } else {
-      returnFiber.firstEffect = returnFiber.lastEffect = current;
-    }
-    current.nextEffect = null;
-    current.effectTag = Deletion;
-
-    // Upgrade this work in progress to a real Suspense component.
-    workInProgress.tag = SuspenseComponent;
-    workInProgress.stateNode = null;
-    workInProgress.memoizedState = null;
-    // This is now an insertion.
-    workInProgress.effectTag |= Placement;
-    // Retry as a real Suspense component.
-    return updateSuspenseComponent(null, workInProgress, renderExpirationTime);
   } else if (isSuspenseInstancePending(suspenseInstance)) {
     // This component is still pending more data from the server, so we can't hydrate its
     // content. We treat it as if this component suspended itself. It might seem as if
@@ -1884,6 +1947,34 @@ function updateContextConsumer(
   // React DevTools reads this flag.
   workInProgress.effectTag |= PerformedWork;
   reconcileChildren(current, workInProgress, newChildren, renderExpirationTime);
+  return workInProgress.child;
+}
+
+function updateEventComponent(current, workInProgress, renderExpirationTime) {
+  const nextProps = workInProgress.pendingProps;
+  let nextChildren = nextProps.children;
+
+  reconcileChildren(
+    current,
+    workInProgress,
+    nextChildren,
+    renderExpirationTime,
+  );
+  pushHostContextForEvent(workInProgress);
+  return workInProgress.child;
+}
+
+function updateEventTarget(current, workInProgress, renderExpirationTime) {
+  const nextProps = workInProgress.pendingProps;
+  let nextChildren = nextProps.children;
+
+  reconcileChildren(
+    current,
+    workInProgress,
+    nextChildren,
+    renderExpirationTime,
+  );
+  pushHostContextForEvent(workInProgress);
   return workInProgress.child;
 }
 
@@ -2200,6 +2291,22 @@ function beginWork(
           workInProgress,
           renderExpirationTime,
         );
+      }
+      break;
+    }
+    case EventComponent: {
+      if (enableEventAPI) {
+        return updateEventComponent(
+          current,
+          workInProgress,
+          renderExpirationTime,
+        );
+      }
+      break;
+    }
+    case EventTarget: {
+      if (enableEventAPI) {
+        return updateEventTarget(current, workInProgress, renderExpirationTime);
       }
       break;
     }
